@@ -124,9 +124,9 @@ module ReportPortal
     # needed for parallel formatter
     def item_id_of(name, parent_node)
       path = if parent_node.is_root? # folder without parent folder
-               "item?filter.eq.launch=#{@launch_id}&filter.eq.name=#{CGI.escape(name)}" #"&filter.size.path=0"
+               "item?filter.eq.launch=#{@launch_id}&filter.eq.name=#{CGI.escape(name)}&filter.size.path=0"
              else
-               "item?filter.eq.launch=#{@launch_id}&filter.eq.parent=#{parent_node.content.id}&filter.eq.name=#{URI.escape(name)}"
+               "item?filter.eq.launch=#{@launch_id}&filter.eq.parent=#{parent_node.content.id}&filter.eq.name=#{CGI.escape(name)}"
              end
       data = send_request(:get, path)
       STDOUT.puts "Printing data response from method 'item_id_of', class: #{data.class}; value: #{data}"
