@@ -210,7 +210,7 @@ module ReportPortal
             end
             if parallel? && index < path_components.size - 1 && is_created
               id_of_created_item = ReportPortal.item_id_of(name, parent_node)
-              item = ReportPortal::TestItem.new(name, type, id_of_created_item, time_to_send(desired_time), description, false, tags)
+              item = ReportPortal::TestItem.new(name: name, type: type, id: id_of_created_item, start_time: time_to_send(desired_time), description: description, closed: false, tags: tags)
               child_node = Tree::TreeNode.new(path_component, item)
               parent_node << child_node
             else

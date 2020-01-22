@@ -129,7 +129,7 @@ module ReportPortal
                "item?filter.eq.launch=#{@launch_id}&filter.eq.parent=#{parent_node.content.id}&filter.eq.name=#{URI.escape(name)}"
              end
       data = send_request(:get, path)
-      if data.key? 'content'
+      if data.is_a?(Hash) && data.key?('content')
         data['content'].empty? ? nil : data['content'][0]['id']
       end
     end
