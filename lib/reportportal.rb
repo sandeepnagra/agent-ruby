@@ -126,7 +126,7 @@ module ReportPortal
       path = if parent_node.is_root? # folder without parent folder
                "item?filter.eq.launch=#{@launch_id}&filter.eq.name=#{CGI.escape(name)}&filter.size.path=0"
              else
-               "item?filter.eq.parent=#{parent_node.content.id}&filter.eq.name=#{CGI.escape(name)}"
+               "item?filter.eq.launch=#{@launch_id}&filter.eq.parent=#{parent_node.content.id}&filter.eq.name=#{URI.escape(name)}"
              end
       data = send_request(:get, path)
       if data.key? 'content'
@@ -139,7 +139,7 @@ module ReportPortal
       path = if parent_id.nil?
                "item?filter.eq.launch=#{@launch_id}&filter.size.path=0&page.page=1&page.size=100"
              else
-               "item?filter.eq.parent=#{parent_id}&page.page=1&page.size=100"
+               "item?filter.eq.launch=#{@launch_id}&filter.eq.parent=#{parent_id}&page.page=1&page.size=100"
              end
       ids = []
       loop do
