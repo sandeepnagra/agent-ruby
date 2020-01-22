@@ -1,21 +1,3 @@
-# Copyright 2015 EPAM Systems
-# 
-# 
-# This file is part of Report Portal.
-# 
-# Report Portal is free software: you can redistribute it and/or modify
-# it under the terms of the GNU Lesser General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-# 
-# ReportPortal is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU Lesser General Public License for more details.
-# 
-# You should have received a copy of the GNU Lesser General Public License
-# along with Report Portal.  If not, see <http://www.gnu.org/licenses/>.
-
 require 'cucumber/formatter/io'
 require 'cucumber/formatter/hook_query_visitor'
 require 'tree'
@@ -40,33 +22,35 @@ module ReportPortal
       end
 
       def initialize
-        ReportPortal.last_used_time = 0
+        @last_used_time = 0
         @root_node = Tree::TreeNode.new('')
+        @parent_item_node = @root_node
         start_launch
       end
 
-      def start_launch(desired_time = ReportPortal.now, cmd_args = ARGV)
+      def start_launch(desired_time = ReportPortal.now)
         if attach_to_launch?
           ReportPortal.launch_id =
-              if ReportPortal::Settings.instance.launch_id
-                ReportPortal::Settings.instance.launch_id
-              else
-                file_path = ReportPortal::Settings.instance.file_with_launch_id || (Pathname(Dir.tmpdir) + 'rp_launch_id.tmp')
-                File.read(file_path)
-              end
+            if ReportPortal::Settings.instance.launch_id
+              ReportPortal::Settings.instance.launch_id
+            else
+              file_path = ReportPortal::Settings.instance.file_with_launch_id || (Pathname(Dir.tmpdir) + 'rp_launch_id.tmp')
+              File.read(file_path)
+            end
           $stdout.puts "Attaching to launch #{ReportPortal.launch_id}"
         else
           description = ReportPortal::Settings.instance.description
-          description ||= cmd_args.map {|arg| arg.gsub(/rp_uuid=.+/, "rp_uuid=[FILTERED]")}.join(' ')
+          description ||= ARGV.map { |arg| arg.gsub(/rp_uuid=.+/, 'rp_uuid=[FILTERED]') }.join(' ')
           ReportPortal.start_launch(description, time_to_send(desired_time))
         end
       end
 
-      def test_case_started(event, desired_time = ReportPortal.now) # TODO: time should be a required argument
+      # TODO: time should be a required argument
+      def test_case_started(event, desired_time = ReportPortal.now)
         test_case = event.test_case
         feature = test_case.feature
-        unless same_feature_as_previous_test_case?(feature)
-          end_feature(desired_time) if @feature_node
+        if report_hierarchy? && !same_feature_as_previous_test_case?(feature)
+          end_feature(desired_time) unless @parent_item_node.is_root?
           start_feature_with_parentage(feature, desired_time)
         end
 
@@ -75,9 +59,9 @@ module ReportPortal
         tags = test_case.tags.map(&:name)
         type = :STEP
 
-        ReportPortal.current_scenario = ReportPortal::TestItem.new(name, type, nil, time_to_send(desired_time), description, false, tags)
+        ReportPortal.current_scenario = ReportPortal::TestItem.new(name: name, type: type, id: nil, start_time: time_to_send(desired_time), description: description, closed: false, tags: tags)
         scenario_node = Tree::TreeNode.new(SecureRandom.hex, ReportPortal.current_scenario)
-        @feature_node << scenario_node
+        @parent_item_node << scenario_node
         ReportPortal.current_scenario.id = ReportPortal.start_item(scenario_node)
       end
 
@@ -85,7 +69,7 @@ module ReportPortal
         result = event.result
         status = result.to_sym
         issue = nil
-        if [:undefined, :pending].include?(status)
+        if %i[undefined pending].include?(status)
           status = :failed
           issue = result.message
         end
@@ -101,7 +85,7 @@ module ReportPortal
           if step_source.multiline_arg.doc_string?
             message << %(\n"""\n#{step_source.multiline_arg.content}\n""")
           elsif step_source.multiline_arg.data_table?
-            message << step_source.multiline_arg.raw.reduce("\n") {|acc, row| acc << "| #{row.join(' | ')} |\n"}
+            message << step_source.multiline_arg.raw.reduce("\n") { |acc, row| acc << "| #{row.join(' | ')} |\n" }
           end
           ReportPortal.send_log(:trace, message, time_to_send(desired_time))
         end
@@ -112,18 +96,18 @@ module ReportPortal
         result = event.result
         status = result.to_sym
 
-        if [:failed, :pending, :undefined].include?(status)
-          exception_info = if [:failed, :pending].include?(status)
+        if %i[failed pending undefined].include?(status)
+          exception_info = if %i[failed pending].include?(status)
                              ex = result.exception
-                             sprintf("%s: %s\n  %s", ex.class.name, ex.message, ex.backtrace.join("\n  "))
+                             format("%s: %s\n  %s", ex.class.name, ex.message, ex.backtrace.join("\n  "))
                            else
-                             sprintf("Undefined step: %s:\n%s", test_step.text, test_step.source.last.backtrace_line)
+                             format("Undefined step: %s:\n%s", test_step.text, test_step.source.last.backtrace_line)
                            end
           ReportPortal.send_log(:error, exception_info, time_to_send(desired_time))
         end
 
         if status != :passed
-          log_level = (status == :skipped) ? :warn : :error
+          log_level = status == :skipped  ? :warn : :error
           step_type = if step?(test_step)
                         'Step'
                       else
@@ -135,8 +119,8 @@ module ReportPortal
         end
       end
 
-      def done(desired_time = ReportPortal.now)
-        end_feature(desired_time) if @feature_node
+      def test_run_finished(_event, desired_time = ReportPortal.now)
+        end_feature(desired_time) unless @parent_item_node.is_root?
 
         unless attach_to_launch?
           close_all_children_of(@root_node) # Folder items are closed here as they can't be closed after finishing a feature
@@ -149,8 +133,8 @@ module ReportPortal
         ReportPortal.send_log(:info, message, time_to_send(desired_time))
       end
 
-      def embed(src, mime_type, label, desired_time = ReportPortal.now)
-        ReportPortal.send_file(:info, src, label, time_to_send(desired_time), mime_type)
+      def embed(path_or_src, mime_type, label, desired_time = ReportPortal.now)
+        ReportPortal.send_file(:info, path_or_src, label, time_to_send(desired_time), mime_type)
       end
 
       private
@@ -163,14 +147,14 @@ module ReportPortal
       #   * that process/thread can't start the next test until it's done with the previous one
       def time_to_send(desired_time)
         time_to_send = desired_time
-        if time_to_send <= ReportPortal.last_used_time
-          time_to_send = ReportPortal.last_used_time + 1
+        if time_to_send <= @last_used_time
+          time_to_send = @last_used_time + 1
         end
-        ReportPortal.last_used_time = time_to_send
+        @last_used_time = time_to_send
       end
 
       def same_feature_as_previous_test_case?(feature)
-        @feature_node && @feature_node.name == feature.location.file.split(File::SEPARATOR).last
+        @parent_item_node.name == feature.location.file.split(File::SEPARATOR).last
       end
 
       def start_feature_with_parentage(feature, desired_time)
@@ -230,19 +214,19 @@ module ReportPortal
               child_node = Tree::TreeNode.new(path_component, item)
               parent_node << child_node
             else
-              item = ReportPortal::TestItem.new(name, type, nil, time_to_send(desired_time), description, false, tags)
+              item = ReportPortal::TestItem.new(name: name, type: type, id: nil, start_time: time_to_send(desired_time), description: description, closed: false, tags: tags)
               child_node = Tree::TreeNode.new(path_component, item)
               parent_node << child_node
-              item.id = ReportPortal.start_item(child_node)
+              item.id = ReportPortal.start_item(child_node) # TODO: multithreading
             end
           end
           parent_node = child_node
         end
-        @feature_node = child_node
+        @parent_item_node = child_node
       end
 
       def end_feature(desired_time)
-        ReportPortal.finish_item(@feature_node.content, nil, time_to_send(desired_time))
+        ReportPortal.finish_item(@parent_item_node.content, nil, time_to_send(desired_time))
         # Folder items can't be finished here because when the folder started we didn't track
         #   which features the folder contains.
         # It's not easy to do it using Cucumber currently:
@@ -259,6 +243,10 @@ module ReportPortal
 
       def step?(test_step)
         !::Cucumber::Formatter::HookQueryVisitor.new(test_step).hook?
+      end
+
+      def report_hierarchy?
+        !ReportPortal::Settings.instance.formatter_modes.include?('skip_reporting_hierarchy')
       end
     end
   end
